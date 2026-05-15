@@ -7,53 +7,80 @@ import io
 st.set_page_config(page_title="Dashboard de Cobertura de Stock", layout="wide")
 st.title("📦 Análisis de Cobertura y Faltantes de Stock")
 
+
 @st.cache_data(show_spinner=False)
 def cargar_datos():
     try:
         st.write("📥 Cargando tiendas.xlsx...")
+
+        # 0. Cargar Maestro de Tiendas y Zonas (FILTRO PRINCIPAL)
         df_tiendas_zona = pd.read_excel('tiendas.xlsx')
         df_tiendas_zona.columns = ['Tienda', 'Zona']
+
         lista_tiendas_permitidas = df_tiendas_zona['Tienda'].unique()
+
         st.success(f"✅ tiendas.xlsx cargado | {len(df_tiendas_zona)} registros")
 
         # 1. Cargar Sectores Tienda
         st.write("📥 Cargando SectoresTienda.xlsx...")
+
         df_sec_tienda = pd.read_excel('SectoresTienda.xlsx')
         df_sec_tienda.columns = df_sec_tienda.columns.str.strip()
+
         df_sec_tienda.rename(columns=lambda x: x.lower(), inplace=True)
+
         df_sec_tienda.rename(columns={
             'tienda': 'Tienda',
             'sector tienda': 'Sector',
             'amplitud tienda': 'Amplitud'
         }, inplace=True)
 
-        df_sec_tienda = df_sec_tienda[df_sec_tienda['Tienda'].isin(lista_tiendas_permitidas)]
+        df_sec_tienda = df_sec_tienda[
+            df_sec_tienda['Tienda'].isin(lista_tiendas_permitidas)
+        ]
+
         st.success(f"✅ SectoresTienda.xlsx cargado | {len(df_sec_tienda)} registros")
 
         # 1.5 Cargar Sectores Articulos
         st.write("📥 Cargando SectoresArticulos.xlsx...")
+
         df_sec_art = pd.read_excel('SectoresArticulos.xlsx')
+
         df_sec_art.columns = df_sec_art.columns.str.strip()
         df_sec_art.rename(columns=lambda x: x.title(), inplace=True)
+
         st.success(f"✅ SectoresArticulos.xlsx cargado | {len(df_sec_art)} registros")
 
         # Cruzar para obtener el Alta
         st.write("🔄 Generando cruce de alta...")
+
         df_alta = pd.merge(
             df_sec_tienda,
             df_sec_art,
             on=['Sector', 'Amplitud'],
             how='inner'
         )
+
         st.success(f"✅ Cruce generado | {len(df_alta)} registros")
 
         # 2. Cargar Familias
         st.write("📥 Cargando Familias.xlsx...")
+
         df_familias = pd.read_excel('Familias.xlsx')
+
+        # Tomamos las primeras 3 columnas
         df_familias = df_familias.iloc[:, :3]
+
         df_familias.columns = ['Articulo', 'Familia', 'Descripcion']
 
-        df_alta = pd.merge(df_alta, df_familias, on='Articulo', how='left')
+        # Asignar la familia y descripción
+        df_alta = pd.merge(
+            df_alta,
+            df_familias,
+            on='Articulo',
+            how='left'
+        )
+
         df_alta['Familia'] = df_alta['Familia'].fillna('SIN FAMILIA')
         df_alta['Descripcion'] = df_alta['Descripcion'].fillna('SIN DESCRIPCION')
 
@@ -61,35 +88,44 @@ def cargar_datos():
 
         # 3. Cargar los CSV de Stock
         st.write("📥 Cargando bases de stock...")
+
         bases_stock = []
 
         for i in range(1, 5):
+
             archivo = f'base{i}.csv'
 
             if os.path.exists(archivo):
+
                 st.write(f"📄 Procesando {archivo}...")
 
                 try:
+                    # ⚡ CAMBIO IMPORTANTE PARA CLOUD
                     df_base = pd.read_csv(
                         archivo,
-                        sep=None,
-                        engine='python',
-                        encoding='utf-8-sig'
-                    )
-                except:
-                    df_base = pd.read_csv(
-                        archivo,
-                        sep=None,
-                        engine='python'
+                        sep=';',
+                        encoding='utf-8-sig',
+                        low_memory=False
                     )
 
-                st.write(f"✅ {archivo} cargado | {len(df_base)} registros")
+                except Exception as e:
+
+                    st.warning(f"⚠️ Error UTF en {archivo}: {e}")
+
+                    df_base = pd.read_csv(
+                        archivo,
+                        sep=';',
+                        low_memory=False
+                    )
+
+                st.success(f"✅ {archivo} cargado | {len(df_base)} registros")
 
                 df_base.columns = df_base.columns.str.strip()
 
                 cols_dict = {}
 
                 for col in df_base.columns:
+
                     col_limpia = col.replace('\ufeff', '').lower()
 
                     if col_limpia == 'tienda':
@@ -103,9 +139,14 @@ def cargar_datos():
 
                 df_base.rename(columns=cols_dict, inplace=True)
 
-                columnas_necesarias = ['Tienda', 'Articulo', 'Stock Cet']
+                columnas_necesarias = [
+                    'Tienda',
+                    'Articulo',
+                    'Stock Cet'
+                ]
 
                 if all(c in df_base.columns for c in columnas_necesarias):
+
                     df_base = df_base[
                         df_base['Tienda'].isin(lista_tiendas_permitidas)
                     ]
@@ -121,13 +162,25 @@ def cargar_datos():
                 st.warning(f"⚠️ No existe {archivo}")
 
         if bases_stock:
+
             st.write("🔄 Consolidando stock...")
 
-            df_stock = pd.concat(bases_stock, ignore_index=True)
+            df_stock = pd.concat(
+                bases_stock,
+                ignore_index=True
+            )
 
             for col in ['Tienda', 'Articulo']:
-                df_stock[col] = pd.to_numeric(df_stock[col], errors='coerce')
-                df_alta[col] = pd.to_numeric(df_alta[col], errors='coerce')
+
+                df_stock[col] = pd.to_numeric(
+                    df_stock[col],
+                    errors='coerce'
+                )
+
+                df_alta[col] = pd.to_numeric(
+                    df_alta[col],
+                    errors='coerce'
+                )
 
             df_stock = df_stock.groupby(
                 ['Tienda', 'Articulo'],
@@ -139,6 +192,7 @@ def cargar_datos():
             return df_alta, df_stock, df_tiendas_zona
 
         else:
+
             st.error("❌ No se cargó ninguna base de stock")
 
             return (
@@ -148,15 +202,18 @@ def cargar_datos():
             )
 
     except Exception as e:
-        st.error(f"❌ Error crítico: {e}")
+
+        st.error(f"❌ Error crítico al cargar datos: {e}")
 
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 
 def generar_excel(df_resumen):
+
     output = io.BytesIO()
 
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+
         df_resumen.to_excel(
             writer,
             index=False,
@@ -174,13 +231,21 @@ def generar_excel(df_resumen):
         worksheet = writer.sheets['Resumen']
 
         for col_num, value in enumerate(df_resumen.columns.values):
-            worksheet.write(0, col_num, value, header_format)
+
+            worksheet.write(
+                0,
+                col_num,
+                value,
+                header_format
+            )
+
             worksheet.set_column(col_num, col_num, 20)
 
     return output.getvalue()
 
 
 # --- EJECUCIÓN ---
+
 st.write("🚀 Iniciando carga de datos...")
 
 df_alta_total, df_stock_total, df_zonas = cargar_datos()
@@ -205,10 +270,12 @@ if not df_alta_total.empty:
     st.markdown("---")
 
     if tienda_seleccionada == "Todas las tiendas":
+
         alta_tienda = df_alta_total.copy()
         stock_tienda = df_stock_total.copy()
 
     else:
+
         alta_tienda = df_alta_total[
             df_alta_total['Tienda'] == tienda_seleccionada
         ].copy()
@@ -244,8 +311,12 @@ if not df_alta_total.empty:
 
     # KPIs
     total_articulos_alta = len(df_analisis)
+
     articulos_con_stock = df_analisis['Con Stock'].sum()
-    articulos_faltantes = total_articulos_alta - articulos_con_stock
+
+    articulos_faltantes = (
+        total_articulos_alta - articulos_con_stock
+    )
 
     cobertura_pct = (
         articulos_con_stock / total_articulos_alta * 100
@@ -255,10 +326,160 @@ if not df_alta_total.empty:
 
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("Impactos de Alta", f"{total_articulos_alta:,}")
-    col2.metric("Impactos con Stock", f"{articulos_con_stock:,}")
-    col3.metric("Cobertura (%)", f"{cobertura_pct:.1f} %")
-    col4.metric("Huecos Totales", f"{articulos_faltantes:,}")
+    col1.metric(
+        "Impactos de Alta",
+        f"{total_articulos_alta:,}"
+    )
+
+    col2.metric(
+        "Impactos con Stock",
+        f"{articulos_con_stock:,}"
+    )
+
+    col3.metric(
+        "Cobertura (%)",
+        f"{cobertura_pct:.1f} %"
+    )
+
+    col4.metric(
+        "Huecos Totales",
+        f"{articulos_faltantes:,}"
+    )
+
+    # --- SECCIÓN 1: FAMILIAS ---
+    st.markdown("---")
+
+    resumen_familia = df_analisis.groupby('Familia').agg(
+        Alta_Total=('Articulo', 'count'),
+        Con_Stock=('Con Stock', 'sum')
+    ).reset_index()
+
+    resumen_familia['Faltantes'] = (
+        resumen_familia['Alta_Total'] -
+        resumen_familia['Con_Stock']
+    )
+
+    resumen_familia['Cobertura (%)'] = (
+        resumen_familia['Con_Stock'] /
+        resumen_familia['Alta_Total'] * 100
+    ).round(1)
+
+    resumen_familia = resumen_familia.sort_values(
+        'Faltantes',
+        ascending=False
+    )
+
+    col_t, col_b = st.columns([3, 1])
+
+    with col_t:
+        st.subheader("📊 1. ¿Qué Familias fallan?")
+
+    with col_b:
+        st.download_button(
+            "📥 Excel Familias",
+            generar_excel(resumen_familia),
+            f"Cobertura_{tienda_seleccionada}.xlsx"
+        )
+
+    st.dataframe(
+        resumen_familia,
+        column_config={
+            "Cobertura (%)": st.column_config.ProgressColumn(
+                format="%f%%",
+                min_value=0,
+                max_value=100
+            )
+        },
+        hide_index=True,
+        width='stretch'
+    )
+
+    # --- SECCIÓN 2: ¿QUÉ ARTÍCULOS? ---
+    if tienda_seleccionada == "Todas las tiendas":
+
+        st.markdown("---")
+
+        st.subheader("🕵️ 2. ¿Qué artículos están faltando más?")
+
+        resumen_sku = df_analisis.groupby(
+            ['Articulo', 'Descripcion', 'Familia']
+        ).agg(
+            Tiendas_de_Alta=('Tienda', 'count'),
+            Tiendas_con_Stock=('Con Stock', 'sum')
+        ).reset_index()
+
+        resumen_sku['Tiendas_sin_Stock'] = (
+            resumen_sku['Tiendas_de_Alta'] -
+            resumen_sku['Tiendas_con_Stock']
+        )
+
+        resumen_sku = resumen_sku.sort_values(
+            'Tiendas_sin_Stock',
+            ascending=False
+        )
+
+        st.dataframe(
+            resumen_sku.head(100),
+            hide_index=True,
+            width='stretch'
+        )
+
+        # --- SECCIÓN 3: ZONAS ---
+        st.markdown("---")
+
+        st.subheader("📍 3. ¿En qué Zonas/Regiones hay más faltantes?")
+
+        resumen_zona = df_analisis.groupby('Zona').agg(
+            Alta_Total=('Articulo', 'count'),
+            Con_Stock=('Con Stock', 'sum')
+        ).reset_index()
+
+        resumen_zona['Faltantes'] = (
+            resumen_zona['Alta_Total'] -
+            resumen_zona['Con_Stock']
+        )
+
+        resumen_zona['Cobertura (%)'] = (
+            resumen_zona['Con_Stock'] /
+            resumen_zona['Alta_Total'] * 100
+        ).round(1)
+
+        st.dataframe(
+            resumen_zona.sort_values('Cobertura (%)'),
+            hide_index=True,
+            width='stretch'
+        )
+
+    # --- DETALLE POR FAMILIA ---
+    st.markdown("---")
+
+    st.subheader("🔎 Detalle de Faltantes por Familia")
+
+    fam_sel = st.selectbox(
+        "Selecciona Familia:",
+        resumen_familia['Familia'].unique()
+    )
+
+    det = df_analisis[
+        (df_analisis['Familia'] == fam_sel) &
+        (df_analisis['Con Stock'] == False)
+    ]
+
+    st.dataframe(
+        det[
+            [
+                'Tienda',
+                'Zona',
+                'Articulo',
+                'Descripcion',
+                'Sector',
+                'Amplitud'
+            ]
+        ],
+        hide_index=True,
+        width='stretch'
+    )
 
 else:
-    st.error("❌ No se pudieron cargar los datos")
+
+    st.info("Carga el archivo 'tiendas.xlsx' para comenzar.")
