@@ -155,9 +155,10 @@ if not df_alta_total.empty:
     with col_b:
         st.download_button("📥 Excel Familias", generar_excel(resumen_familia), f"Cobertura_{tienda_seleccionada}.xlsx")
 
+    # Corrección aquí: width='stretch'
     st.dataframe(resumen_familia, column_config={
         "Cobertura (%)": st.column_config.ProgressColumn(format="%f%%", min_value=0, max_value=100)}, hide_index=True,
-                 use_container_width=True)
+                 width='stretch')
 
     # --- SECCIÓN 2: ¿QUÉ ARTÍCULOS? (SOLO PARA "TODAS LAS TIENDAS") ---
     if tienda_seleccionada == "Todas las tiendas":
@@ -174,7 +175,9 @@ if not df_alta_total.empty:
         resumen_sku = resumen_sku.sort_values('Tiendas_sin_Stock', ascending=False)
 
         st.write("Esta tabla responde: ¿En cuántas tiendas falta este código específico?")
-        st.dataframe(resumen_sku.head(100), hide_index=True, use_container_width=True)
+
+        # Corrección aquí: width='stretch'
+        st.dataframe(resumen_sku.head(100), hide_index=True, width='stretch')
 
         # --- SECCIÓN 3: ¿EN DÓNDE? ---
         st.markdown("---")
@@ -187,14 +190,17 @@ if not df_alta_total.empty:
         resumen_zona['Faltantes'] = resumen_zona['Alta_Total'] - resumen_zona['Con_Stock']
         resumen_zona['Cobertura (%)'] = (resumen_zona['Con_Stock'] / resumen_zona['Alta_Total'] * 100).round(1)
 
-        st.dataframe(resumen_zona.sort_values('Cobertura (%)'), hide_index=True, use_container_width=True)
+        # Corrección aquí: width='stretch'
+        st.dataframe(resumen_zona.sort_values('Cobertura (%)'), hide_index=True, width='stretch')
 
     # BUSCADOR INDIVIDUAL
     st.markdown("---")
     st.subheader("🔎 Detalle de Faltantes por Familia")
     fam_sel = st.selectbox("Selecciona Familia:", resumen_familia['Familia'].unique())
     det = df_analisis[(df_analisis['Familia'] == fam_sel) & (df_analisis['Con Stock'] == False)]
-    st.dataframe(det[['Tienda', 'Zona', 'Articulo', 'Sector', 'Amplitud']], hide_index=True, use_container_width=True)
+
+    # Corrección aquí: width='stretch'
+    st.dataframe(det[['Tienda', 'Zona', 'Articulo', 'Sector', 'Amplitud']], hide_index=True, width='stretch')
 
 else:
     st.info("Carga el archivo 'tiendas.xlsx' para comenzar.")
