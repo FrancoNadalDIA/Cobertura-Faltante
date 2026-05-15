@@ -7,13 +7,12 @@ import io
 st.set_page_config(page_title="Dashboard de Cobertura de Stock", layout="wide")
 st.title("📦 Análisis de Cobertura y Faltantes de Stock")
 
-
 @st.cache_data
 def cargar_datos():
     try:
         # 0. Cargar Maestro de Tiendas y Zonas (FILTRO PRINCIPAL)
         df_tiendas_zona = pd.read_excel('tiendas.xlsx')
-        df_tiendas_zona.columns = ['Tienda', 'Zona']  # A: Tienda, B: REGION (como zona)
+        df_tiendas_zona.columns = ['Tienda', 'Zona']
         lista_tiendas_permitidas = df_tiendas_zona['Tienda'].unique()
 
         # 1. Cargar Sectores Tienda
@@ -23,7 +22,6 @@ def cargar_datos():
         df_sec_tienda.rename(columns={'tienda': 'Tienda', 'sector tienda': 'Sector', 'amplitud tienda': 'Amplitud'},
                              inplace=True)
 
-        # Filtrar solo tiendas del excel "tiendas"
         df_sec_tienda = df_sec_tienda[df_sec_tienda['Tienda'].isin(lista_tiendas_permitidas)]
 
         # 1.5 Cargar Sectores Articulos
@@ -34,14 +32,15 @@ def cargar_datos():
         # Cruzar para obtener el Alta
         df_alta = pd.merge(df_sec_tienda, df_sec_art, on=['Sector', 'Amplitud'], how='inner')
 
-        # 2. Cargar Familias
+        # 2. Cargar Familias (MODIFICADO PARA INCLUIR DESCRIPCIÓN)
         df_familias = pd.read_excel('Familias.xlsx')
-        df_familias = df_familias.iloc[:, :2]
-        df_familias.columns = ['Articulo', 'Familia']
+        df_familias = df_familias.iloc[:, :3] # Tomamos las primeras 3 columnas
+        df_familias.columns = ['Articulo', 'Familia', 'Descripcion']
 
-        # Asignar la familia
+        # Asignar la familia y descripción
         df_alta = pd.merge(df_alta, df_familias, on='Articulo', how='left')
         df_alta['Familia'] = df_alta['Familia'].fillna('SIN FAMILIA')
+        df_alta['Descripcion'] = df_alta['Descripcion'].fillna('SIN DESCRIPCION')
 
         # 3. Cargar los CSV de Stock
         bases_stock = []
@@ -67,7 +66,6 @@ def cargar_datos():
                 df_base.rename(columns=cols_dict, inplace=True)
                 columnas_necesarias = ['Tienda', 'Articulo', 'Stock Cet']
                 if all(c in df_base.columns for c in columnas_necesarias):
-                    # Filtrar stock solo para tiendas permitidas
                     df_base = df_base[df_base['Tienda'].isin(lista_tiendas_permitidas)]
                     bases_stock.append(df_base[columnas_necesarias])
 
@@ -87,14 +85,13 @@ def cargar_datos():
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 
-# Función para Excel
 def generar_excel(df_resumen):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_resumen.to_excel(writer, index=False, sheet_name='Resumen_Familias')
+        df_resumen.to_excel(writer, index=False, sheet_name='Resumen')
         workbook = writer.book
         header_format = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
-        worksheet = writer.sheets['Resumen_Familias']
+        worksheet = writer.sheets['Resumen']
         for col_num, value in enumerate(df_resumen.columns.values):
             worksheet.write(0, col_num, value, header_format)
             worksheet.set_column(col_num, col_num, 20)
@@ -107,11 +104,10 @@ df_alta_total, df_stock_total, df_zonas = cargar_datos()
 if not df_alta_total.empty:
     tiendas_disponibles = sorted(df_alta_total['Tienda'].dropna().unique())
     opciones_selector = ["Todas las tiendas"] + [int(t) for t in tiendas_disponibles]
-    tienda_seleccionada = st.selectbox("Selecciona una Tienda (Filtro por excel 'tiendas' aplicado)", opciones_selector)
+    tienda_seleccionada = st.selectbox("Selecciona una Tienda", opciones_selector)
 
     st.markdown("---")
 
-    # PROCESAMIENTO
     if tienda_seleccionada == "Todas las tiendas":
         alta_tienda = df_alta_total.copy()
         stock_tienda = df_stock_total.copy()
@@ -119,13 +115,11 @@ if not df_alta_total.empty:
         alta_tienda = df_alta_total[df_alta_total['Tienda'] == tienda_seleccionada].copy()
         stock_tienda = df_stock_total[df_stock_total['Tienda'] == tienda_seleccionada].copy()
 
-    # Cruce Operativo
     df_analisis = pd.merge(alta_tienda, stock_tienda[['Tienda', 'Articulo', 'Stock Cet']], on=['Tienda', 'Articulo'],
                            how='left')
     df_analisis['Stock Cet'] = pd.to_numeric(df_analisis['Stock Cet'], errors='coerce').fillna(0)
     df_analisis['Con Stock'] = df_analisis['Stock Cet'] > 0
 
-    # Pegar Zona
     df_analisis = pd.merge(df_analisis, df_zonas, on='Tienda', how='left')
 
     # KPIs
@@ -155,18 +149,17 @@ if not df_alta_total.empty:
     with col_b:
         st.download_button("📥 Excel Familias", generar_excel(resumen_familia), f"Cobertura_{tienda_seleccionada}.xlsx")
 
-    # Corrección aquí: width='stretch'
     st.dataframe(resumen_familia, column_config={
         "Cobertura (%)": st.column_config.ProgressColumn(format="%f%%", min_value=0, max_value=100)}, hide_index=True,
                  width='stretch')
 
-    # --- SECCIÓN 2: ¿QUÉ ARTÍCULOS? (SOLO PARA "TODAS LAS TIENDAS") ---
+    # --- SECCIÓN 2: ¿QUÉ ARTÍCULOS? (TOP FALTANTES) ---
     if tienda_seleccionada == "Todas las tiendas":
         st.markdown("---")
-        st.subheader("🕵️ 2. ¿Qué artículos están faltando más? (Top Faltantes)")
+        st.subheader("🕵️ 2. ¿Qué artículos están faltando más?")
 
-        # Agrupamos por Artículo para ver su comportamiento en la cadena
-        resumen_sku = df_analisis.groupby(['Articulo', 'Familia']).agg(
+        # Agrupamos por Artículo e incluimos la Descripcion
+        resumen_sku = df_analisis.groupby(['Articulo', 'Descripcion', 'Familia']).agg(
             Tiendas_de_Alta=('Tienda', 'count'),
             Tiendas_con_Stock=('Con Stock', 'sum')
         ).reset_index()
@@ -174,33 +167,24 @@ if not df_alta_total.empty:
         resumen_sku['Tiendas_sin_Stock'] = resumen_sku['Tiendas_de_Alta'] - resumen_sku['Tiendas_con_Stock']
         resumen_sku = resumen_sku.sort_values('Tiendas_sin_Stock', ascending=False)
 
-        st.write("Esta tabla responde: ¿En cuántas tiendas falta este código específico?")
-
-        # Corrección aquí: width='stretch'
         st.dataframe(resumen_sku.head(100), hide_index=True, width='stretch')
 
         # --- SECCIÓN 3: ¿EN DÓNDE? ---
         st.markdown("---")
         st.subheader("📍 3. ¿En qué Zonas/Regiones hay más faltantes?")
-
-        resumen_zona = df_analisis.groupby('Zona').agg(
-            Alta_Total=('Articulo', 'count'),
-            Con_Stock=('Con Stock', 'sum')
-        ).reset_index()
+        resumen_zona = df_analisis.groupby('Zona').agg(Alta_Total=('Articulo', 'count'), Con_Stock=('Con Stock', 'sum')).reset_index()
         resumen_zona['Faltantes'] = resumen_zona['Alta_Total'] - resumen_zona['Con_Stock']
         resumen_zona['Cobertura (%)'] = (resumen_zona['Con_Stock'] / resumen_zona['Alta_Total'] * 100).round(1)
-
-        # Corrección aquí: width='stretch'
         st.dataframe(resumen_zona.sort_values('Cobertura (%)'), hide_index=True, width='stretch')
 
-    # BUSCADOR INDIVIDUAL
+    # BUSCADOR INDIVIDUAL CON DESCRIPCION
     st.markdown("---")
     st.subheader("🔎 Detalle de Faltantes por Familia")
     fam_sel = st.selectbox("Selecciona Familia:", resumen_familia['Familia'].unique())
     det = df_analisis[(df_analisis['Familia'] == fam_sel) & (df_analisis['Con Stock'] == False)]
 
-    # Corrección aquí: width='stretch'
-    st.dataframe(det[['Tienda', 'Zona', 'Articulo', 'Sector', 'Amplitud']], hide_index=True, width='stretch')
+    # Se agregó 'Descripcion' a la visualización
+    st.dataframe(det[['Tienda', 'Zona', 'Articulo', 'Descripcion', 'Sector', 'Amplitud']], hide_index=True, width='stretch')
 
 else:
     st.info("Carga el archivo 'tiendas.xlsx' para comenzar.")
